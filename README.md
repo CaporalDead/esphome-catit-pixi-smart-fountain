@@ -77,15 +77,15 @@ Create a new device in ESPHome and use the following complete configuration file
 esphome:
   name: fontaine-chat
   friendly_name: fontaine-chat
-  on_boot:
-      priority: 600 
-      then:
-        - script.execute: gestion_cycle_pompe
-        - if:
-            condition:
-              lambda: 'return id(mode_uv).current_option() == "Automatique";'
-            then:
-              - script.execute: cycle_uv_auto
+  on_boot:
+      priority: 600 
+      then:
+        - script.execute: gestion_cycle_pompe
+        - if:
+            condition:
+              lambda: 'return id(mode_uv).current_option() == "Automatique";'
+            then:
+              - script.execute: cycle_uv_auto
 
 bk72xx:
   board: cbu
@@ -101,22 +101,31 @@ wifi:
   ssid: "YOUR_WIFI_SSID"
   password: "YOUR_WIFI_PASSWORD"
 
+globals:
+  - id: temps_restant_pompe
+    type: int
+    initial_value: '0'
+  - id: temps_restant_uv
+    type: int
+    initial_value: '0'
+  
 time:
-  - platform: sntp
-    id: my_time
-    timezone: "Europe/Paris"
-  
+  - platform: sntp
+    id: my_time
+    timezone: "Europe/Paris"
+  
 number:
-  - platform: template
-    name: "Jours avant changement de filtre"
-    id: filtre_jours_restants
-    min_value: 0
-    max_value: 30
-    initial_value: 30
-    step: 1
-    optimistic: true
-    icon: "mdi:air-filter"
-    entity_category: diagnostic
+  - platform: template
+    name: "Jours avant changement de filtre"
+    id: filtre_jours_restants
+    min_value: 0
+    max_value: 30
+    initial_value: 30
+    step: 1
+    optimistic: true
+    restore_value: true
+    icon: "mdi:air-filter"
+    entity_category: diagnostic
 
 select:
   - platform: template
@@ -129,6 +138,7 @@ select:
       - "Intermittent (5m ON / 15m OFF)"
     initial_option: "Continu"
     optimistic: true
+    restore_value: true
     on_value:
       then:
         - script.execute: gestion_cycle_pompe
@@ -142,6 +152,7 @@ select:
       - "Manuel"
     initial_option: "Automatique"
     optimistic: true
+    restore_value: true
     on_value:
       then:
         - if:
@@ -180,7 +191,13 @@ interval:
           if (current > 0) {
             id(filtre_jours_restants).publish_state(current - 1);
           }
-          
+
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(temps_restant_pompe) > 0) id(temps_restant_pompe) -= 1;
+          if (id(temps_restant_uv) > 0) id(temps_restant_uv) -= 1;
+
 switch:
   - platform: gpio
     pin: P9
@@ -231,19 +248,19 @@ script:
     then:
       - lambda: |-
           std::string mode = id(mode_pompe).current_option();
-          
           if (mode == "Arrêt") {
             id(pompe).turn_off();
           } else {
             id(pompe).turn_on();
           }
-      
       - while:
           condition:
             lambda: 'return id(mode_pompe).current_option() == "Intermittent (5m ON / 15m OFF)";'
           then:
+            - globals.set: { id: temps_restant_pompe, value: '300' } # 5 minutes
             - switch.turn_on: pompe
             - delay: 5min
+            - globals.set: { id: temps_restant_pompe, value: '900' } # 15 minutes
             - switch.turn_off: pompe
             - delay: 15min
 
@@ -254,16 +271,20 @@ script:
           condition:
             lambda: 'return id(mode_uv).current_option() == "Automatique";'
           then:
+            - globals.set: { id: temps_restant_uv, value: '3600' } # 1 heure
             - switch.turn_on: lampe_uv
             - delay: 1h
+            - globals.set: { id: temps_restant_uv, value: '25200' } # 7 heures
             - switch.turn_off: lampe_uv
             - delay: 7h
 
   - id: minuteur_manuel_uv
     mode: restart
     then:
+      - globals.set: { id: temps_restant_uv, value: '3600' }
       - delay: 1h
       - switch.turn_off: lampe_uv
+      - globals.set: { id: temps_restant_uv, value: '0' }
               
 binary_sensor:
   - platform: gpio
@@ -302,6 +323,36 @@ binary_sensor:
     id: statut_lampe_uv
     lambda: 'return id(lampe_uv).state;'
     icon: "mdi:lightbulb-on-outline"
+
+  - platform: status
+    name: "Statut Connexion Fontaine"
+
+sensor:
+  - platform: template
+    name: "Temps restant Pompe"
+    id: sensor_temps_pompe
+    unit_of_measurement: "s"
+    device_class: duration
+    update_interval: 10s
+    icon: "mdi:timer-sand"
+    lambda: |-
+      if (id(mode_pompe).current_option() == "Intermittent (5m ON / 15m OFF)") {
+        return id(temps_restant_pompe);
+      }
+      return 0;
+
+  - platform: template
+    name: "Temps restant UV"
+    id: sensor_temps_uv
+    unit_of_measurement: "s"
+    device_class: duration
+    update_interval: 10s
+    icon: "mdi:timer-sand"
+    lambda: |-
+      if (id(mode_uv).current_option() == "Automatique" || id(lampe_uv).state) {
+        return id(temps_restant_uv);
+      }
+      return 0;
 ```
 
 ---
