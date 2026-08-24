@@ -61,6 +61,7 @@ graph TD
         ESP <-->|Native API / Watchdog 2min| HA[Home Assistant Dashboard]
         HA -->|Select Mode| ESP
         HA -->|Reset Filter Button| ESP
+        HA -->|Reboot Board| ESP
     end
 
 ```
@@ -139,6 +140,10 @@ button:
             id: filtre_jours_restants
             value: 30
         - logger.log: "Compteur de filtre réinitialisé à 30 jours."
+
+  - platform: restart
+    name: "Redémarrer la fontaine"
+    id: restart_board
 
 interval:
   - interval: 24h
@@ -224,10 +229,20 @@ binary_sensor:
       inverted: true
     name: "Bouton Physique"
     id: bouton_physique
-    on_press:
-      then:
-        - button.press: reset_filtre_btn
-        - logger.log: "Bouton physique pressé : Reset du filtre effectué !"
+    on_click:
+      # Appui court (entre 50ms et 2 secondes) : Reset du filtre
+      - min_length: 50ms
+        max_length: 2s
+        then:
+          - button.press: reset_filtre_btn
+          - logger.log: "Bouton (Appui court) : Reset du filtre effectué !"
+      
+      # Appui long (plus de 5 secondes) : Redémarrage de la carte
+      - min_length: 5s
+        max_length: 60s
+        then:
+          - logger.log: "Bouton (Appui long) : Redémarrage matériel en cours..."
+          - button.press: restart_board
 ```
 
 ---
@@ -238,3 +253,6 @@ binary_sensor:
 2. **Water Level Alert:** Displays a warning state (`problem`) inside Home Assistant when the reservoir runs dry while the pump is active.
 3. **Filter Life Tracker:** A 30-day countdown tracking filter saturation. Pressing the physical button on the back of the fountain triggers a logic reset back to 30 days, mirroring factory behavior.
 4. **Automated UV Sterilization:** Follows the strict 1-hour active / 7-hour rest cycle out of the box.
+5. **Physical Button Multi-Action:**
+* **Short Press:** Triggers a logic reset of the 30-day filter tracker back to 30 days, mirroring factory behavior.
+* **Long Press (5 seconds):** Triggers a clean hardware reboot of the ESP board (useful for troubleshooting without unplugging the fountain).
