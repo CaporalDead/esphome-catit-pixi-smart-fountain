@@ -21,6 +21,7 @@ This project replaces the original stock firmware on the internal Tuya CBU Wi-Fi
 ---
 
 ## 🔌 Flashing & UART Connections (Crucial Warning!)
+
 Unlike the side test pads (GPIOs), to flash the fountain's CBU module:
 
 * Do not use the left-side test pads.
@@ -69,14 +70,49 @@ graph TD
 
 ---
 
+## 💡 Features & Exposed Entities
+
+Once integrated, your Home Assistant dashboard will have access to a rich set of entities, automatically restoring their last state upon reboot.
+
+### 🎛️ Exposed Entities Summary
+
+| Home Assistant Entity | Type | Description |
+| --- | --- | --- |
+| **Mode de la Pompe** | `select` | Switch between *Arrêt*, *Continu*, and *Intermittent (5m ON / 15m OFF)*. State persists across reboots. |
+| **Mode Lampe UV** | `select` | Switch between *Automatique* (1h ON / 7h OFF) and *Manuel* (1h safety timer). State persists across reboots. |
+| **Jours avant changement...** | `number` | A 30-day decremental counter for the filter life. State persists across reboots. |
+| **Temps restant Pompe** | `sensor` (duration) | Real-time countdown timer (HH:MM:SS) for the intermittent pump mode cycle. |
+| **Temps restant UV** | `sensor` (duration) | Real-time countdown timer (HH:MM:SS) for the active UV sterilization cycle. |
+| **Capteur Niveau d'Eau** | `binary_sensor` | Warns if the reservoir runs dry (Problem class). |
+| **Statut Lampe UV** | `binary_sensor` | Read-only indicator showing if the UV lamp is currently shining. |
+| **Statut Connexion...** | `binary_sensor` | Connection status, highly recommended for external watchdog automations. |
+| **Pompe Fontaine** / **Lampe UV** | `switch` | Direct manual overrides for the hardware components. |
+| **Réinitialiser le filtre** | `button` | Software trigger to reset the 30-day filter counter. |
+| **Redémarrer la fontaine** | `button` | Software trigger to reboot the ESP board. |
+
+### 🌟 Core Capabilities
+
+1. **Pump Mode Selector:** Switch dynamically between `Arrêt` (Off), `Continu` (Continuous), and `Intermittent (5m ON / 15m OFF)`.
+2. **Cycle Timers:** New real-time duration sensors natively outputting the remaining time for the intermittent pump mode and UV cycles directly to your dashboard.
+3. **Water Level Alert:** Displays a warning state (`problem`) inside Home Assistant when the reservoir runs dry while the pump is active.
+4. **Filter Life Tracker:** A 30-day countdown tracking filter saturation. Pressing the physical button on the back of the fountain triggers a logic reset back to 30 days, mirroring factory behavior.
+5. **Dual-Mode UV Sterilization:**
+* **Automatique:** Follows the strict 1-hour active / 7-hour rest cycle autonomously.
+* **Manuel:** Allows you to turn the lamp on manually. An internal safety timer will automatically turn it off after 1 hour.
+6. **Physical Button Multi-Action:**
+* **Short Press:** Triggers a logic reset of the 30-day filter tracker back to 30 days, mirroring factory behavior.
+* **Long Press (5 seconds):** Triggers a clean hardware reboot of the ESP board (useful for troubleshooting without unplugging the fountain).
+
+---
+
 ## 📝 Complete ESPHome Configuration (`yaml`)
 
 Create a new device in ESPHome and use the following complete configuration file:
 
 ```yaml
 esphome:
-  name: fontaine-chat
-  friendly_name: fontaine-chat
+  name: fontaine-chat
+  friendly_name: fontaine-chat
   on_boot:
       priority: 600 
       then:
@@ -88,18 +124,25 @@ esphome:
               - script.execute: cycle_uv_auto
 
 bk72xx:
-  board: cbu
+  board: cbu
 
 logger:
 
 api:
-  reboot_timeout: 2min
+  reboot_timeout: 2min
 
 ota:
+  - platform: esphome
+    version: 2
 
 wifi:
-  ssid: "YOUR_WIFI_SSID"
-  password: "YOUR_WIFI_PASSWORD"
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+
+time:
+  - platform: sntp
+    id: my_time
+    timezone: "Europe/Paris"
 
 globals:
   - id: temps_restant_pompe
@@ -108,11 +151,6 @@ globals:
   - id: temps_restant_uv
     type: int
     initial_value: '0'
-  
-time:
-  - platform: sntp
-    id: my_time
-    timezone: "Europe/Paris"
   
 number:
   - platform: template
@@ -191,13 +229,13 @@ interval:
           if (current > 0) {
             id(filtre_jours_restants).publish_state(current - 1);
           }
-
+          
   - interval: 1s
     then:
       - lambda: |-
           if (id(temps_restant_pompe) > 0) id(temps_restant_pompe) -= 1;
           if (id(temps_restant_uv) > 0) id(temps_restant_uv) -= 1;
-
+          
 switch:
   - platform: gpio
     pin: P9
@@ -248,19 +286,21 @@ script:
     then:
       - lambda: |-
           std::string mode = id(mode_pompe).current_option();
+          
           if (mode == "Arrêt") {
             id(pompe).turn_off();
           } else {
             id(pompe).turn_on();
           }
+      
       - while:
           condition:
             lambda: 'return id(mode_pompe).current_option() == "Intermittent (5m ON / 15m OFF)";'
           then:
-            - globals.set: { id: temps_restant_pompe, value: '300' } # 5 minutes
+            - globals.set: { id: temps_restant_pompe, value: '300' }
             - switch.turn_on: pompe
             - delay: 5min
-            - globals.set: { id: temps_restant_pompe, value: '900' } # 15 minutes
+            - globals.set: { id: temps_restant_pompe, value: '900' }
             - switch.turn_off: pompe
             - delay: 15min
 
@@ -271,10 +311,10 @@ script:
           condition:
             lambda: 'return id(mode_uv).current_option() == "Automatique";'
           then:
-            - globals.set: { id: temps_restant_uv, value: '3600' } # 1 heure
+            - globals.set: { id: temps_restant_uv, value: '3600' }
             - switch.turn_on: lampe_uv
             - delay: 1h
-            - globals.set: { id: temps_restant_uv, value: '25200' } # 7 heures
+            - globals.set: { id: temps_restant_uv, value: '25200' }
             - switch.turn_off: lampe_uv
             - delay: 7h
 
@@ -285,47 +325,6 @@ script:
       - delay: 1h
       - switch.turn_off: lampe_uv
       - globals.set: { id: temps_restant_uv, value: '0' }
-              
-binary_sensor:
-  - platform: gpio
-    pin:
-      number: P15
-      mode: INPUT_PULLUP
-      inverted: true
-    name: "Capteur Niveau d'Eau"
-    id: capteur_eau
-    device_class: problem
-
-  - platform: gpio
-    pin:
-      number: P8
-      mode: INPUT_PULLUP
-      inverted: true
-    name: "Bouton Physique"
-    id: bouton_physique
-    on_click:
-      # Appui court (entre 50ms et 2 secondes) : Reset du filtre
-      - min_length: 50ms
-        max_length: 2s
-        then:
-          - button.press: reset_filtre_btn
-          - logger.log: "Bouton (Appui court) : Reset du filtre effectué !"
-      
-      # Appui long (plus de 5 secondes) : Redémarrage de la carte
-      - min_length: 5s
-        max_length: 60s
-        then:
-          - logger.log: "Bouton (Appui long) : Redémarrage matériel en cours..."
-          - button.press: restart_board
-
-  - platform: template
-    name: "Statut Lampe UV"
-    id: statut_lampe_uv
-    lambda: 'return id(lampe_uv).state;'
-    icon: "mdi:lightbulb-on-outline"
-
-  - platform: status
-    name: "Statut Connexion Fontaine"
 
 sensor:
   - platform: template
@@ -353,18 +352,44 @@ sensor:
         return id(temps_restant_uv);
       }
       return 0;
+              
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: P15
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Capteur Niveau d'Eau"
+    id: capteur_eau
+    device_class: problem
+
+  - platform: gpio
+    pin:
+      number: P8
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Bouton Physique"
+    id: bouton_physique
+    on_click:
+      - min_length: 50ms
+        max_length: 2s
+        then:
+          - button.press: reset_filtre_btn
+          - logger.log: "Bouton (Appui court) : Reset du filtre effectué !"
+      
+      - min_length: 5s
+        max_length: 60s
+        then:
+          - logger.log: "Bouton (Appui long) : Redémarrage matériel en cours..."
+          - button.press: restart_board
+
+  - platform: template
+    name: "Statut Lampe UV"
+    id: statut_lampe_uv
+    lambda: 'return id(lampe_uv).state;'
+    icon: "mdi:lightbulb-on-outline"
+    
+  - platform: status
+    name: "Statut Connexion Fontaine"
+
 ```
-
----
-
-## 💡 Features included in Home Assistant
-
-1. **Pump Mode Selector:** Switch dynamically between `Arrêt` (Off), `Continu` (Continuous), and `Intermittent (5m ON / 15m OFF)`.
-2. **Water Level Alert:** Displays a warning state (`problem`) inside Home Assistant when the reservoir runs dry while the pump is active.
-3. **Filter Life Tracker:** A 30-day countdown tracking filter saturation. Pressing the physical button on the back of the fountain triggers a logic reset back to 30 days, mirroring factory behavior.
-4. **Dual-Mode UV Sterilization:**
-* **Automatique:** Follows the strict 1-hour active / 7-hour rest cycle autonomously.
-* **Manuel:** Allows you to turn the lamp on manually. An internal safety timer will automatically turn it off after 1 hour.
-5. **Physical Button Multi-Action:**
-* **Short Press:** Triggers a logic reset of the 30-day filter tracker back to 30 days, mirroring factory behavior.
-* **Long Press (5 seconds):** Triggers a clean hardware reboot of the ESP board (useful for troubleshooting without unplugging the fountain).
