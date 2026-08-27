@@ -20,17 +20,35 @@ This project replaces the original stock firmware on the internal Tuya CBU Wi-Fi
 
 ---
 
-## 🔌 Flashing & UART Connections (Crucial Warning!)
+## 🔌 Flashing & UART Connections
 
-Unlike the side test pads (GPIOs), to flash the fountain's CBU module:
+Since the fountain relies on a Tuya CBU module featuring a Beken BK7231N chip, it requires specific tools designed for the LibreTiny platform rather than standard ESP8266/ESP32 flashers.
 
-* Do not use the left-side test pads.
-* Use the pin holes located on the right side of the module.
-* It is strongly recommended to temporarily solder a Dupont connector strip (or header pins) into these right-side pin holes to securely connect your UART adapter without loose connections while toggling the CEN pin to enter flash mode.
+### Recommended Tools & Official Documentation
+* **[LibreTiny Flashing Guide](https://docs.libretiny.eu/docs/flashing/tools/)**: The official and most comprehensive documentation for flashing Beken chips.
+* **[ltchiptool](https://github.com/libretiny-eu/ltchiptool)**: The standard GUI/CLI utility for reading and writing Beken firmwares.
+* **[ESPHome BK72xx Component](https://esphome.io/components/bk72xx.html)**: The official ESPHome documentation for the Beken architecture.
+
+### Wiring & Crucial Hardware Warning
+To flash the CBU module via a USB-to-TTL adapter, **do not use the 3.3V power from your UART adapter**, as it may not provide enough current. Instead, use the fountain's native power supply and establish a common ground.
+
+* **Do not use the left-side test pads.** They are highly unreliable for flashing.
+* **Use the through-holes located on the right side of the module.**
+* It is strongly recommended to temporarily solder a Dupont connector strip (or header pins) into these right-side pin holes. A loose connection will inevitably cause flashing failures.
+
+**The Flashing Sequence:**
+1. Connect `RX1` to `TX`, `TX1` to `RX`, and `GND` to `GND` between the CBU module and your UART adapter. **Leave the 3.3V UART pin disconnected.**
+2. Plug in the fountain's native power supply to turn on the board.
+3. Start the flashing process in `ltchiptool` or your chosen web flasher.
+4. Momentarily short the `CEN` (Chip Enable) pin to `GND` to reboot the chip into Download Mode, allowing the flasher to catch the bootloader sequence.
 
 ---
 
 ## 🛠️ Hardware Reverse-Engineering & Pinout
+
+![Annotated Board](board.jpg)
+
+![Wiring](wires.png)
 
 Through careful exploration, the internal pin mapping for the Tuya CBU module inside the Catit PIXI was mapped as follows:
 
